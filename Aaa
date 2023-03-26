@@ -1,0 +1,149 @@
+ballSize = 0.0254; 
+inaccuracy = 0.00873; 
+dev = 0.02583; 
+Cd = 0.00059; 
+m = 0.02; 
+
+data = readtable('projectileMotionData.xlsx');
+dataRows = size(data, 1);
+dataColumns = size(data,2);
+
+[a1, a2] = ErrorByDrag(data, m, Cd) 
+% [b1, b2] = ErrorByDistortion(data, dev)
+[c1, c2] = ErrorByVelo(data)
+[d1, d2] = ErrorByCalibration(data, inaccuracy)
+[e, a, b] = ExpError(data) 
+
+function dist = R (theta0, y0, v0) 
+cos1 = cos(theta0);
+sin1 = sin(theta0);
+sin2 = sin(2 * theta0);
+dist = v0 ^ 2 * sin2 / 9.8 + v0 * cos1 * (sqrt((v0 * sin1 /9.8) ^ 2 + 2 * y0 / 9.8) - v0 * sin1 / 9.8);
+
+end
+
+function [err, errMean, errSd] = ExpError (data)
+err = [];
+errMean = [];
+errSd = [];
+for i = 1:5
+for j = 1:3
+k = j + ((i - 1) * 3);
+theta0 = pi / 180 * table2array(data(k, 2));
+y0 = table2array(data(k, 3));   
+v0 = table2array(data(k, 4));
+RR = table2array(data(k, 5));
+R_ = R(theta0, y0, v0);
+err(i,j) = abs(R_ - RR) / R_ * 100;
+end
+errMean(i) = mean(err(i,:));
+errSd(i) = std(err(i,:));
+end 
+end
+
+function Ldiff = foo(t, L, m, k) 
+Ldiff = zeros(4,1);
+x = L(1); 
+dxdt = L(2); 
+y = L(3); 
+dydt = L(4);
+v = sqrt(dxdt^2 + dydt^2); 
+d2xdt2 = -k / m * v * dxdt; 
+d2ydt2 = -k / m * v * dydt - 9.8; 
+Ldiff(1) = dxdt; 
+Ldiff(2) = d2xdt2; 
+Ldiff(3) = dydt; 
+Ldiff(4) = d2ydt2; 
+end
+
+function [dragErrMean, dragErrSd] = ErrorByDrag (data, m, Cd)
+errors = [];
+for i = 1:size(data, 1)
+theta0 = pi / 180 * table2array(data(i, 2));
+y0 = table2array(data(i, 3));
+v0 = table2array(data(i, 4));
+tspan = [0, 3]; 
+L0 = [0, v0 * cos(theta0), y0, v0 * sin(theta0)];
+[t,L] = ode45(@(t, L) foo(t, L, m, Cd), tspan, L0); 
+x = L(:,1); 
+y = L(:,3);
+temp = [];
+eps = 0.1;
+for j = 1 : size(t)
+if L(j, 1) > 0.1 & abs(L(j, 3)) < eps
+temp(end+1) = L(j, 1);
+end
+end
+R_ = R(theta0, y0, v0);
+errors(i) = abs(R_ - mean(temp)) / R_ * 100;
+end
+dragErrMean = mean(errors);
+dragErrSd = std(errors);
+end
+
+function [veloErrMean, veloErrSd] = ErrorByVelo (data)
+v0_2 = mean(table2array(data(1:3, 4)));
+v0_1 = mean(table2array(data(4:size(data, 1), 4)));
+errors = [];
+for i = 1:3
+theta0 = pi / 180 * table2array(data(i, 2));
+y0 = table2array(data(i, 3));    
+v0 = table2array(data(i, 4));
+R_ = R(theta0, y0, v0);
+errors(i) = abs(R_ - R(theta0, y0, v0_2)) / R_ * 100; 
+end
+for i = 4:size(data, 1)
+theta0 = pi / 180 * table2array(data(i, 2));
+y0 = table2array(data(i, 3));
+v0 = table2array(data(i, 4));
+R_ = R(theta0, y0, v0);
+errors(i) = abs(R_ - R(theta0, y0, v0_1)) / R_ * 100;
+end
+veloErrMean = mean(errors);
+veloErrSd = std(errors);
+end
+
+%{
+
+function [distortionErrMean, distortionSd] = ErrorByDistortion (data, dev)
+
+errors = [];
+
+for i = 1:size(data, 1)
+
+theta0 = pi / 180 * table2array(data(i, 2));
+
+y0 = table2array(data(i, 3));
+
+v0 = table2array(data(i, 4));
+
+R_ = R(theta0, y0, v0);
+
+errors(i) = abs((1-cos(dev)) * R_) / R_ * 100;
+
+end
+
+distortionErrMean = mean(errors);
+
+distortionSd = std(errors);
+
+end
+
+%}
+
+function [calibrationErrMean, calibrationErrSd] = ErrorByCalibration (data, inaccuracy)
+errors = [];
+for i = 1:size(data, 1)
+theta0 = pi / 180 * table2array(data(i, 2));
+y0 = table2array(data(i, 3));
+v0 = table2array(data(i, 4));
+temp = [];
+R_ = R(theta0, y0, v0);
+for j = 1:100
+temp(j) = abs(R_ - R((theta0- inaccuracy + j * inaccuracy / 50), y0, v0));
+end
+errors(i) = max(temp) / R_ * 100;
+end
+calibrationErrMean = mean(errors);
+calibrationErrSd = std(errors);
+end
